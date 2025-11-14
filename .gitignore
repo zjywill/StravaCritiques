@@ -1,0 +1,13 @@
+# OAuth tokens and automation artifacts
+user_token/
+.chrome_profile/
+
+# Local activity exports
+latest_activity.json
+latest_activities.json
+
+.DS_Store
+.vscode/
+__pycache__/
+.env
+.venv/
