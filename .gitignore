@@ -5,6 +5,7 @@ user_token/
 # Local activity exports
 latest_activity.json
 latest_activities.json
+activity_critiques.json
 
 .DS_Store
 .vscode/

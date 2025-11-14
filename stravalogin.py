@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--scope",
-        default="activity:read",
+        default="activity:read,activity:read_all,activity:write",
         help="要请求的 Strava scope，多个 scope 用逗号隔开。",
     )
     return parser.parse_args()
