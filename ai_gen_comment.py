@@ -6,36 +6,226 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import create_agent
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 
 
-DEFAULT_SYSTEM_PROMPT = "You are a concise assistant."
+ACTIVITY_AGENT_SYSTEM_PROMPT = (
+    "你是运动锐评助理。请先阅读提供的 Strava 活动 JSON，辨别运动类型，"
+    "必要时调用相应工具获取指标，再给出有趣又犀利的中文点评。点评里要引用工具返回的关键数据。"
+)
 LATEST_ACTIVITIES_FILE = Path("latest_activities.json")
 CRITIQUE_OUTPUT_FILE = Path("activity_critiques.json")
 ACTIVITY_PROMPT_PATH = Path("prompts/activity_prompt.md")
 
 
-def build_chain(
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+def _parse_activity_payload(activity_json: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(activity_json)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+    return {"raw": activity_json}
+
+
+def _format_distance(meters: Any) -> str:
+    try:
+        distance = float(meters)
+    except (TypeError, ValueError):
+        return "未知距离"
+    return f"{distance / 1000:.2f} 公里"
+
+
+def _format_duration(seconds: Any) -> str:
+    try:
+        total_seconds = int(float(seconds))
+    except (TypeError, ValueError):
+        return "未知用时"
+    minutes, sec = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d} 小时 {minutes:d} 分 {sec:d} 秒"
+    return f"{minutes:d} 分 {sec:d} 秒"
+
+
+def _format_pace(distance_m: Any, moving_time_s: Any) -> str:
+    try:
+        distance_km = float(distance_m) / 1000
+        moving_time = float(moving_time_s)
+        if distance_km <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return "配速未知"
+    pace = moving_time / distance_km
+    minutes, seconds = divmod(int(pace), 60)
+    return f"{minutes:d}:{seconds:02d}/公里"
+
+
+def _format_speed(distance_m: Any, moving_time_s: Any) -> str:
+    try:
+        distance_km = float(distance_m) / 1000
+        moving_time = float(moving_time_s)
+        if moving_time <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return "均速未知"
+    speed = distance_km / (moving_time / 3600)
+    return f"{speed:.1f} 公里/小时"
+
+
+def _format_elevation(gain_m: Any) -> str:
+    try:
+        gain = float(gain_m)
+    except (TypeError, ValueError):
+        return "海拔增益未知"
+    return f"爬升 {gain:.0f} 米"
+
+
+def _format_heartrate(avg: Any, max_hr: Any) -> str:
+    try:
+        avg_hr = int(float(avg)) if avg is not None else None
+    except (TypeError, ValueError):
+        avg_hr = None
+    try:
+        max_val = int(float(max_hr)) if max_hr is not None else None
+    except (TypeError, ValueError):
+        max_val = None
+    if avg_hr and max_val:
+        return f"平均心率 {avg_hr}，最高 {max_val} bpm"
+    if avg_hr:
+        return f"平均心率 {avg_hr} bpm"
+    if max_val:
+        return f"最高心率 {max_val} bpm"
+    return "心率未知"
+
+
+def _activity_header(activity: dict[str, Any]) -> str:
+    name = activity.get("name") or "未命名训练"
+    sport_type = activity.get("sport_type") or activity.get("type") or "未知"
+    return f"{name}｜{sport_type}"
+
+
+def _log_tool_invocation(tool_name: str, activity: dict[str, Any]) -> None:
+    activity_id = activity.get("id", "unknown")
+    sport_type = activity.get("sport_type") or activity.get("type") or "未知类型"
+    print(f"[AgentTool] {tool_name} 输入活动 {activity_id}｜{sport_type}")
+
+
+@tool
+def analyze_running_activity(activity_json: str) -> str:
+    """根据 Strava 活动 JSON 提供跑步指标，帮助你判断配速、心率、爬升情况。"""
+
+    activity = _parse_activity_payload(activity_json)
+    _log_tool_invocation("analyze_running_activity", activity)
+    distance = _format_distance(activity.get("distance"))
+    moving_time = _format_duration(activity.get("moving_time"))
+    pace = _format_pace(activity.get("distance"), activity.get("moving_time"))
+    heartrate = _format_heartrate(
+        activity.get("average_heartrate"), activity.get("max_heartrate")
+    )
+    elevation = _format_elevation(activity.get("total_elevation_gain"))
+    cadence = activity.get("average_cadence")
+    cadence_note = f"步频 {cadence:.0f}" if isinstance(cadence, (int, float)) else "步频未知"
+
+    segments = [
+        _activity_header(activity),
+        f"距离：{distance}",
+        f"移动时间：{moving_time}",
+        f"平均配速：{pace}",
+        f"{heartrate}",
+        f"{elevation}",
+        cadence_note,
+    ]
+    suffer_score = activity.get("suffer_score")
+    if isinstance(suffer_score, (int, float)):
+        segments.append(f"受虐指数 {suffer_score:.0f}")
+    return "\n".join(segments)
+
+
+@tool
+def analyze_cycling_activity(activity_json: str) -> str:
+    """根据 Strava 活动 JSON 提供骑行指标，关注均速、功率和爬升。"""
+
+    activity = _parse_activity_payload(activity_json)
+    _log_tool_invocation("analyze_cycling_activity", activity)
+    distance = _format_distance(activity.get("distance"))
+    moving_time = _format_duration(activity.get("moving_time"))
+    speed = _format_speed(activity.get("distance"), activity.get("moving_time"))
+    elevation = _format_elevation(activity.get("total_elevation_gain"))
+    avg_power = activity.get("average_watts")
+    power_note = (
+        f"平均功率 {avg_power:.0f} W"
+        if isinstance(avg_power, (int, float))
+        else "功率未知"
+    )
+    weighted_avg_watts = activity.get("weighted_average_watts")
+    if isinstance(weighted_avg_watts, (int, float)):
+        power_note += f"，加权 {weighted_avg_watts:.0f} W"
+
+    heartrate = _format_heartrate(
+        activity.get("average_heartrate"), activity.get("max_heartrate")
+    )
+
+    segments = [
+        _activity_header(activity),
+        f"距离：{distance}",
+        f"移动时间：{moving_time}",
+        f"平均速度：{speed}",
+        power_note,
+        f"{heartrate}",
+        f"{elevation}",
+    ]
+    if isinstance(activity.get("calories"), (int, float)):
+        segments.append(f"卡路里 {activity['calories']:.0f}")
+    return "\n".join(segments)
+
+
+@tool
+def inspect_general_activity(activity_json: str) -> str:
+    """当运动类型未知或为力量、游泳等项目时，给出通用指标摘要。"""
+
+    activity = _parse_activity_payload(activity_json)
+    _log_tool_invocation("inspect_general_activity", activity)
+    distance = activity.get("distance")
+    distance_note = _format_distance(distance) if distance is not None else "距离未知"
+    moving_time_note = _format_duration(activity.get("moving_time"))
+    notes = [
+        _activity_header(activity),
+        f"距离：{distance_note}",
+        f"移动时间：{moving_time_note}",
+    ]
+    if activity.get("average_heartrate") or activity.get("max_heartrate"):
+        notes.append(
+            _format_heartrate(
+                activity.get("average_heartrate"), activity.get("max_heartrate")
+            )
+        )
+    if isinstance(activity.get("total_elevation_gain"), (int, float)):
+        notes.append(_format_elevation(activity.get("total_elevation_gain")))
+    if isinstance(activity.get("calories"), (int, float)):
+        notes.append(f"卡路里 {activity['calories']:.0f}")
+    return "\n".join(notes)
+
+
+def build_activity_agent(
+    system_prompt: str = ACTIVITY_AGENT_SYSTEM_PROMPT,
     *,
     model: str = "gpt-3.5-turbo",
     base_url: str | None = None,
     api_key: str | None = None,
 ):
-    """Wire together the LangChain runnable graph for the configured backend."""
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system_prompt),
-            ("human", "{question}"),
-        ]
-    )
-    print(
-        f"Using model: {model} at {base_url or 'default endpoint'} api_key={'set' if api_key else 'not set'}")
+    """Create the latest LangChain agent for activity analysis."""
+
     llm = ChatOpenAI(model=model, base_url=base_url, api_key=api_key)
-    parser = StrOutputParser()
-    return prompt | llm | parser
+    tools = [
+        analyze_running_activity,
+        analyze_cycling_activity,
+        inspect_general_activity,
+    ]
+    return create_agent(model=llm, tools=tools, system_prompt=system_prompt)
 
 
 def load_activities(path: Path = LATEST_ACTIVITIES_FILE) -> list[dict[str, Any]]:
@@ -78,6 +268,50 @@ def build_activity_prompt(activity: dict[str, Any]) -> str:
     return f"{instruction}\n\n活动 JSON:\n{details}"
 
 
+def _stringify_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for chunk in content:
+            if isinstance(chunk, str):
+                parts.append(chunk)
+            elif isinstance(chunk, dict):
+                text = chunk.get("text")
+                if text:
+                    parts.append(text)
+        return "\n".join(part for part in parts if part)
+    return ""
+
+
+def _extract_agent_output(agent_payload: Any) -> str | None:
+    if isinstance(agent_payload, dict):
+        messages = agent_payload.get("messages")
+        if isinstance(messages, list):
+            for message in reversed(messages):
+                if isinstance(message, BaseMessage):
+                    text = _stringify_message_content(message.content)
+                    if text:
+                        return text.strip()
+        structured = agent_payload.get("structured_response")
+        if isinstance(structured, str):
+            return structured.strip()
+    return None
+
+
+def generate_agent_critique(agent: Any, activity: dict[str, Any]) -> str:
+    """Invoke the configured agent to produce a critique for an activity."""
+
+    agent_prompt = build_activity_prompt(activity)
+    agent_response = agent.invoke({
+        "messages": [HumanMessage(content=agent_prompt)],
+    })
+    critique = _extract_agent_output(agent_response)
+    if not isinstance(critique, str) or not critique.strip():
+        raise RuntimeError("Agent failed to return critique text for activity")
+    return critique.strip()
+
+
 def load_existing_critiques(
     path: Path = CRITIQUE_OUTPUT_FILE,
 ) -> dict[str, dict[str, Any]]:
@@ -110,17 +344,23 @@ def load_existing_critiques(
 def generate_critiques() -> None:
     """Read local activities, ask the LLM to critique each, and persist the results."""
     load_dotenv()
-    resolved_api_key = os.getenv("ONE_API_KEY")
+    resolved_api_key = os.getenv("ONE_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not resolved_api_key:
         raise RuntimeError(
             "OPENAI_API_KEY is missing. Create a .env file or export the variable.")
 
-    resolved_model = os.getenv(
-        "ONE_API_MODEL") or "gpt-3.5-turbo"
-    resolved_base_url = os.getenv("ONE_API_REMOTE")
-    resolved_system_prompt = os.getenv(
-        "LLM_SYSTEM_PROMPT",
-        "You are a concise assistant that writes witty Chinese critiques about workouts.",
+    resolved_model = (
+        os.getenv("ONE_API_MODEL")
+        or os.getenv("OPENAI_API_MODEL")
+        or "gpt-3.5-turbo"
+    )
+    resolved_base_url = os.getenv("ONE_API_REMOTE") or os.getenv("OPENAI_BASE_URL")
+    resolved_agent_prompt = (
+        os.getenv("LLM_ACTIVITY_AGENT_PROMPT")
+        or os.getenv(
+            "LLM_SYSTEM_PROMPT",
+            ACTIVITY_AGENT_SYSTEM_PROMPT,
+        )
     )
 
     activities = load_activities()
@@ -128,8 +368,8 @@ def generate_critiques() -> None:
         raise RuntimeError(f"No activities found in {LATEST_ACTIVITIES_FILE}.")
 
     print(f"Loaded {resolved_api_key}")
-    chain = build_chain(
-        system_prompt=resolved_system_prompt,
+    agent = build_activity_agent(
+        system_prompt=resolved_agent_prompt,
         model=resolved_model,
         base_url=resolved_base_url,
         api_key=resolved_api_key,
@@ -145,8 +385,7 @@ def generate_critiques() -> None:
             continue
 
         print(f"[{index}/{total}] 开始生成活动 {activity_id} 的锐评...")
-        prompt = build_activity_prompt(activity)
-        critique = chain.invoke({"question": prompt}).strip()
+        critique = generate_agent_critique(agent, activity)
         critiques[activity_id] = {
             "critique": critique,
             "uploaded": False,

@@ -18,10 +18,11 @@ from post_comment import (
 )
 from latest_activity import fetch_latest_activity
 from ai_gen_comment import (
+    ACTIVITY_AGENT_SYSTEM_PROMPT,
     CRITIQUE_OUTPUT_FILE,
     LATEST_ACTIVITIES_FILE,
-    build_activity_prompt,
-    build_chain,
+    build_activity_agent,
+    generate_agent_critique,
     load_activities,
     load_existing_critiques,
 )
@@ -110,12 +111,14 @@ def _resolve_llm_config(args: argparse.Namespace) -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("缺少 LLM API Key，请设置 ONE_API_KEY/OPENAI_API_KEY 或使用 --api-key。")
 
+    agent_prompt = (
+        args.system_prompt
+        or os.getenv("LLM_ACTIVITY_AGENT_PROMPT")
+        or os.getenv("LLM_SYSTEM_PROMPT")
+        or ACTIVITY_AGENT_SYSTEM_PROMPT
+    )
     config = {
-        "system_prompt": args.system_prompt
-        or os.getenv(
-            "LLM_SYSTEM_PROMPT",
-            "You are a concise assistant that writes witty Chinese critiques about workouts.",
-        ),
+        "agent_prompt": agent_prompt,
         "model": args.model or os.getenv("ONE_API_MODEL", "gpt-3.5-turbo"),
         "base_url": args.base_url or os.getenv("ONE_API_REMOTE"),
         "api_key": api_key,
@@ -142,7 +145,7 @@ def generate_critiques_for(
     activities: list[dict[str, Any]],
     *,
     critiques_path: Path,
-    system_prompt: str,
+    agent_prompt: str,
     model: str,
     base_url: str | None,
     api_key: str,
@@ -151,8 +154,8 @@ def generate_critiques_for(
     if not activities:
         raise RuntimeError("活动列表为空，无法生成点评。")
 
-    chain = build_chain(
-        system_prompt=system_prompt,
+    agent = build_activity_agent(
+        system_prompt=agent_prompt,
         model=model,
         base_url=base_url,
         api_key=api_key,
@@ -171,8 +174,7 @@ def generate_critiques_for(
             )
 
         print(f"[{idx}/{total}] 正在生成活动 {activity_id} 的点评...")
-        prompt = build_activity_prompt(activity)
-        critique = chain.invoke({"question": prompt}).strip()
+        critique = generate_agent_critique(agent, activity)
         critiques[activity_id] = {"critique": critique, "uploaded": False}
         print(f"[{idx}/{total}] 已生成活动 {activity_id} 的点评。")
 
