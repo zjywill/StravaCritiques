@@ -104,6 +104,8 @@ python latest_activity.py --per-page 5
 python ai_gen_comment.py
 ```
 
+该脚本会读取 `prompts/activity_prompt.md` 中的 Markdown 指南来构造点评提示词，你可以直接编辑该文件以调整艾生成时的语气或要求。
+
 **4. 上传点评到 Strava**
 
 ```bash

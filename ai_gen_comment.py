@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 DEFAULT_SYSTEM_PROMPT = "You are a concise assistant."
 LATEST_ACTIVITIES_FILE = Path("latest_activities.json")
 CRITIQUE_OUTPUT_FILE = Path("activity_critiques.json")
+ACTIVITY_PROMPT_PATH = Path("prompts/activity_prompt.md")
 
 
 def build_chain(
@@ -49,19 +50,24 @@ def load_activities(path: Path = LATEST_ACTIVITIES_FILE) -> list[dict[str, Any]]
     return [activity for activity in data if isinstance(activity, dict)]
 
 
+def _load_activity_instruction() -> str:
+    """Load the critique prompt template from the markdown file."""
+    try:
+        content = ACTIVITY_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Missing activity prompt template: {ACTIVITY_PROMPT_PATH}"
+        ) from exc
+    if not content:
+        raise RuntimeError(
+            f"Activity prompt template {ACTIVITY_PROMPT_PATH} is empty."
+        )
+    return content
+
+
 def build_activity_prompt(activity: dict[str, Any]) -> str:
     """Create a sarcastic Chinese critique prompt for the provided activity."""
-    instruction = "\n".join(
-        [
-            "请根据我提供的 Strava 活动 JSON 数据，写一段“骑友互喷式”锐评，满足以下要求：",
-            "- 嘴臭但不恶意，是骑友之间互喷、打趣的那种",
-            "- 要抓数据（速度、踏频、心率、功率、爬升、轨迹）挖苦",
-            "- 用轻松搞笑的语气，调侃骑行表现，例如速度慢、心率低、踏频稀碎等",
-            "- 可以夸张，但不能侮辱或攻击",
-            "- 结尾一句话给出“损但暖心”的总结",
-            "** CRITICAL KNOWLEDGE: 速度的单位是m/s",
-        ]
-    )
+    instruction = _load_activity_instruction()
 
     details = json.dumps(
         activity,
