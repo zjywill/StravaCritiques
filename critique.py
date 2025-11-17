@@ -9,7 +9,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from comment_activity import (
+from post_comment import (
     ensure_access_token,
     load_critiques,
     pending_items,
@@ -17,7 +17,7 @@ from comment_activity import (
     update_activity_description,
 )
 from latest_activity import fetch_latest_activity
-from main import (
+from ai_gen_comment import (
     CRITIQUE_OUTPUT_FILE,
     LATEST_ACTIVITIES_FILE,
     build_activity_prompt,
@@ -97,6 +97,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="跳过上传描述，只抓取并生成点评。",
     )
+    parser.add_argument(
+        "--regenerate-uploaded",
+        action="store_true",
+        help="强制重新生成并上传已标记为 uploaded 的点评。",
+    )
     return parser.parse_args()
 
 
@@ -141,6 +146,7 @@ def generate_critiques_for(
     model: str,
     base_url: str | None,
     api_key: str,
+    regenerate_uploaded: bool = False,
 ) -> dict[str, dict[str, Any]]:
     if not activities:
         raise RuntimeError("活动列表为空，无法生成点评。")
@@ -157,8 +163,12 @@ def generate_critiques_for(
         activity_id = str(activity.get("id", "unknown"))
         record = critiques.get(activity_id)
         if record and record.get("uploaded"):
-            print(f"[{idx}/{total}] 活动 {activity_id} 已上传点评，跳过生成。")
-            continue
+            if not regenerate_uploaded:
+                print(f"[{idx}/{total}] 活动 {activity_id} 已上传点评，跳过生成。")
+                continue
+            print(
+                f"[{idx}/{total}] 活动 {activity_id} 已上传点评，因 --regenerate-uploaded 重新生成。"
+            )
 
         print(f"[{idx}/{total}] 正在生成活动 {activity_id} 的点评...")
         prompt = build_activity_prompt(activity)
@@ -259,6 +269,7 @@ def main() -> None:
         critiques = generate_critiques_for(
             activities,
             critiques_path=args.critiques_file,
+            regenerate_uploaded=args.regenerate_uploaded,
             **llm_config,
         )
 

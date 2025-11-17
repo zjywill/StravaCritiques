@@ -18,13 +18,13 @@ cp .env.example .env  # Edit .env with your API keys
 ### Common Development Tasks
 ```bash
 # Run the main LangChain CLI to generate activity critiques
-python main.py
+python ai_gen_comment.py
 
 # Fetch latest Strava activities
 python latest_activity.py --per-page 5
 
 # Upload critiques to Strava activities
-python comment_activity.py --max-count 3
+python post_comment.py --max-count 3
 
 # Start Flask OAuth demo server
 flask --app strava.app --debug run
@@ -55,7 +55,7 @@ This is a Strava activity critique toolkit that combines LangChain LLM processin
 
 ### Core Components
 
-**main.py**: LangChain CLI entry point that orchestrates the critique generation pipeline
+**ai_gen_comment.py**: LangChain CLI entry point that orchestrates the critique generation pipeline
 - Loads Strava activities from `latest_activities.json`
 - Builds LangChain prompt templates with ChatOpenAI
 - Generates Chinese-language sarcastic critiques in `build_activity_prompt()`
@@ -66,7 +66,7 @@ This is a Strava activity critique toolkit that combines LangChain LLM processin
 - Fetches activities from Strava API v3 endpoints
 - Supports token file selection and pagination
 
-**comment_activity.py**: Strava API writer
+**post_comment.py**: Strava API writer
 - Uploads generated critiques as activity descriptions
 - Tracks upload status to prevent duplicates
 - Provides dry-run mode for safe testing
@@ -84,8 +84,8 @@ This is a Strava activity critique toolkit that combines LangChain LLM processin
 ### Data Flow
 1. **Token Capture**: `stravalogin.py` → `user_token/*.json`
 2. **Activity Fetch**: `latest_activity.py` → `latest_activities.json`
-3. **Critique Generation**: `main.py` → `activity_critiques.json`
-4. **Upload**: `comment_activity.py` → Strava API descriptions
+3. **Critique Generation**: `ai_gen_comment.py` → `activity_critiques.json`
+4. **Upload**: `post_comment.py` → Strava API descriptions
 
 ### Key Patterns
 - **OAuth Token Management**: Centralized token refresh logic in `latest_activity.py` shared across scripts
