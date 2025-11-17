@@ -1,5 +1,9 @@
 # Strava 活动点评工具包
 
+<p align="center">
+  <img src="assets/strava-ai-icon.svg" alt="Strava AI Toolkit Icon" width="140" />
+</p>
+
 这是一个基于 LangChain 的 Strava 活动点评自动化工具包，集成了数据抓取、AI 点评生成和自动回写功能。系统支持批量处理你的 Strava 运动数据，使用 LLM 生成中文毒舌点评，并自动同步回 Strava 活动描述。
 
 ## ✨ 核心功能

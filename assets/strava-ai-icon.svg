@@ -1,0 +1,21 @@
+<svg width="220" height="220" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Strava AI Critique icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff7a18" />
+      <stop offset="100%" stop-color="#ff3d68" />
+    </linearGradient>
+    <linearGradient id="pulse" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fef3c7" />
+      <stop offset="100%" stop-color="#fde047" />
+    </linearGradient>
+  </defs>
+  <rect width="220" height="220" rx="48" fill="url(#bg)" />
+  <path d="M45 150C70 110 95 90 120 130C145 170 175 120 195 90" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.45" />
+  <path d="M60 155C85 110 110 85 140 125C165 160 185 130 200 105" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M75 160C95 130 120 105 145 135C165 160 185 145 205 125" fill="none" stroke="url(#pulse)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="70" cy="80" r="18" fill="#fff" opacity="0.9" />
+  <path d="M64 80L69 86L78 72" fill="none" stroke="#ff3d68" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M140 55L180 95" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity="0.6" />
+  <path d="M168 48L189 69" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity="0.4" />
+  <circle cx="168" cy="105" r="10" fill="#fff" opacity="0.7" />
+</svg>
