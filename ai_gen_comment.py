@@ -128,7 +128,8 @@ def analyze_running_activity(activity_json: str) -> str:
     )
     elevation = _format_elevation(activity.get("total_elevation_gain"))
     cadence = activity.get("average_cadence")
-    cadence_note = f"步频 {cadence:.0f}" if isinstance(cadence, (int, float)) else "步频未知"
+    cadence_note = f"步频 {cadence:.0f}" if isinstance(
+        cadence, (int, float)) else "步频未知"
 
     segments = [
         _activity_header(activity),
@@ -147,23 +148,43 @@ def analyze_running_activity(activity_json: str) -> str:
 
 @tool
 def analyze_cycling_activity(activity_json: str) -> str:
-    """根据 Strava 活动 JSON 提供骑行指标，关注均速、功率和爬升。"""
+    """根据 Strava 活动 JSON 提供骑行指标，关注速度、功率、踏频和爬升。"""
 
     activity = _parse_activity_payload(activity_json)
     _log_tool_invocation("analyze_cycling_activity", activity)
     distance = _format_distance(activity.get("distance"))
     moving_time = _format_duration(activity.get("moving_time"))
-    speed = _format_speed(activity.get("distance"), activity.get("moving_time"))
+    elapsed_time = _format_duration(activity.get("elapsed_time"))
+
+    # 速度显示（Strava 提供的 average_speed 单位是米/秒）
+    def format_cycling_speed(avg_speed_ms: Any, max_speed_ms: Any = None) -> str:
+        try:
+            avg_speed = float(avg_speed_ms)
+            avg_kmh = avg_speed * 3.6  # 米/秒 转 公里/小时
+            result = f"平均 {avg_kmh:.1f} 公里/小时"
+            if max_speed_ms is not None:
+                max_speed = float(max_speed_ms)
+                max_kmh = max_speed * 3.6
+                result += f"，最高 {max_kmh:.1f} 公里/小时"
+            return result
+        except (TypeError, ValueError):
+            return "速度未知"
+
+    speed = format_cycling_speed(activity.get("average_speed"),
+                                 activity.get("max_speed"))
     elevation = _format_elevation(activity.get("total_elevation_gain"))
+
+    # 功率数据
     avg_power = activity.get("average_watts")
-    power_note = (
-        f"平均功率 {avg_power:.0f} W"
-        if isinstance(avg_power, (int, float))
-        else "功率未知"
-    )
-    weighted_avg_watts = activity.get("weighted_average_watts")
-    if isinstance(weighted_avg_watts, (int, float)):
-        power_note += f"，加权 {weighted_avg_watts:.0f} W"
+    device_watts = activity.get("device_watts", False)
+    if isinstance(avg_power, (int, float)) and avg_power > 0:
+        power_source = "功率计" if device_watts else "估算"
+        power_note = f"平均功率 {avg_power:.0f} W ({power_source})"
+        weighted_avg_watts = activity.get("weighted_average_watts")
+        if isinstance(weighted_avg_watts, (int, float)):
+            power_note += f"，加权 {weighted_avg_watts:.0f} W"
+    else:
+        power_note = "功率未知"
 
     heartrate = _format_heartrate(
         activity.get("average_heartrate"), activity.get("max_heartrate")
@@ -173,40 +194,172 @@ def analyze_cycling_activity(activity_json: str) -> str:
         _activity_header(activity),
         f"距离：{distance}",
         f"移动时间：{moving_time}",
-        f"平均速度：{speed}",
+        f"总用时：{elapsed_time}",
+        f"速度：{speed}",
         power_note,
         f"{heartrate}",
         f"{elevation}",
     ]
+
+    # 踏频
+    avg_cadence = activity.get("average_cadence")
+    if isinstance(avg_cadence, (int, float)):
+        segments.append(f"踏频 {avg_cadence:.0f} rpm")
+
+    # 温度
+    avg_temp = activity.get("average_temp")
+    if isinstance(avg_temp, (int, float)):
+        segments.append(f"温度 {avg_temp:.0f}°C")
+
+    # 卡路里
     if isinstance(activity.get("calories"), (int, float)):
         segments.append(f"卡路里 {activity['calories']:.0f}")
+
+    # 训练环境
+    if activity.get("trainer"):
+        segments.append("环境：训练台")
+    else:
+        segments.append("环境：户外骑行")
+
+    return "\n".join(segments)
+
+
+@tool
+def analyze_swimming_activity(activity_json: str) -> str:
+    """根据 Strava 活动 JSON 提供游泳指标，关注配速、速度和心率。"""
+
+    activity = _parse_activity_payload(activity_json)
+    _log_tool_invocation("analyze_swimming_activity", activity)
+    distance = _format_distance(activity.get("distance"))
+    moving_time = _format_duration(activity.get("moving_time"))
+    elapsed_time = _format_duration(activity.get("elapsed_time"))
+
+    # 游泳配速通常以每100米为单位
+    def format_swim_pace(distance_m: Any, moving_time_s: Any) -> str:
+        try:
+            distance = float(distance_m)
+            time_seconds = float(moving_time_s)
+            if distance <= 0:
+                raise ValueError
+            pace_per_100m = (time_seconds / distance) * 100
+            minutes, seconds = divmod(int(pace_per_100m), 60)
+            return f"{minutes:d}:{seconds:02d}/100米"
+        except (TypeError, ValueError):
+            return "配速未知"
+
+    # 格式化速度（Strava游泳数据中 average_speed 单位是米/秒）
+    def format_swim_speed(speed_ms: Any, max_speed_ms: Any = None) -> str:
+        try:
+            speed = float(speed_ms)
+            speed_kmh = speed * 3.6  # 米/秒 转 公里/小时
+            result = f"平均 {speed_kmh:.2f} 公里/小时"
+            if max_speed_ms is not None:
+                max_speed = float(max_speed_ms)
+                max_kmh = max_speed * 3.6
+                result += f"，最高 {max_kmh:.2f} 公里/小时"
+            return result
+        except (TypeError, ValueError):
+            return "速度未知"
+
+    pace = format_swim_pace(activity.get("distance"),
+                            activity.get("moving_time"))
+    speed = format_swim_speed(activity.get("average_speed"),
+                              activity.get("max_speed"))
+    heartrate = _format_heartrate(
+        activity.get("average_heartrate"), activity.get("max_heartrate")
+    )
+
+    segments = [
+        _activity_header(activity),
+        f"距离：{distance}",
+        f"移动时间：{moving_time}",
+        f"总用时：{elapsed_time}",
+        f"平均配速：{pace}",
+        f"速度：{speed}",
+        f"{heartrate}",
+    ]
+
+    # 划水频率 (strokes per minute) - 有些设备可能没有这个数据
+    avg_cadence = activity.get("average_cadence")
+    if isinstance(avg_cadence, (int, float)):
+        segments.append(f"划水频率 {avg_cadence:.0f} spm")
+
+    # 卡路里 - 有些活动可能没有这个数据
+    if isinstance(activity.get("calories"), (int, float)):
+        segments.append(f"卡路里 {activity['calories']:.0f}")
+
+    # 训练环境标识
+    if activity.get("trainer"):
+        segments.append("环境：泳池训练")
+
     return "\n".join(segments)
 
 
 @tool
 def inspect_general_activity(activity_json: str) -> str:
-    """当运动类型未知或为力量、游泳等项目时，给出通用指标摘要。"""
+    """当运动类型未知或为通用健身追踪时，给出全面的指标摘要。"""
 
     activity = _parse_activity_payload(activity_json)
     _log_tool_invocation("inspect_general_activity", activity)
+
+    # 基础信息
     distance = activity.get("distance")
-    distance_note = _format_distance(distance) if distance is not None else "距离未知"
-    moving_time_note = _format_duration(activity.get("moving_time"))
+    distance_note = _format_distance(
+        distance) if distance is not None else "无距离记录"
+    moving_time = _format_duration(activity.get("moving_time"))
+    elapsed_time = _format_duration(activity.get("elapsed_time"))
+
     notes = [
         _activity_header(activity),
         f"距离：{distance_note}",
-        f"移动时间：{moving_time_note}",
+        f"移动时间：{moving_time}",
+        f"总用时：{elapsed_time}",
     ]
+
+    # 速度信息（如果有距离和时间数据）
+    avg_speed = activity.get("average_speed")
+    max_speed = activity.get("max_speed")
+    if isinstance(avg_speed, (int, float)) and avg_speed > 0:
+        speed_kmh = avg_speed * 3.6
+        speed_text = f"平均速度：{speed_kmh:.1f} 公里/小时"
+        if isinstance(max_speed, (int, float)):
+            max_kmh = max_speed * 3.6
+            speed_text += f"，最高 {max_kmh:.1f} 公里/小时"
+        notes.append(speed_text)
+
+    # 心率
     if activity.get("average_heartrate") or activity.get("max_heartrate"):
         notes.append(
             _format_heartrate(
-                activity.get("average_heartrate"), activity.get("max_heartrate")
+                activity.get("average_heartrate"),
+                activity.get("max_heartrate")
             )
         )
+
+    # 海拔增益
     if isinstance(activity.get("total_elevation_gain"), (int, float)):
         notes.append(_format_elevation(activity.get("total_elevation_gain")))
+
+    # 踏频/步频（某些活动可能有）
+    avg_cadence = activity.get("average_cadence")
+    if isinstance(avg_cadence, (int, float)):
+        notes.append(f"步频/踏频 {avg_cadence:.0f}")
+
+    # 温度
+    avg_temp = activity.get("average_temp")
+    if isinstance(avg_temp, (int, float)):
+        notes.append(f"温度 {avg_temp:.0f}°C")
+
+    # 卡路里
     if isinstance(activity.get("calories"), (int, float)):
         notes.append(f"卡路里 {activity['calories']:.0f}")
+
+    # 训练环境
+    if activity.get("trainer"):
+        notes.append("环境：室内训练")
+    elif activity.get("start_latlng"):
+        notes.append("环境：户外活动")
+
     return "\n".join(notes)
 
 
@@ -223,6 +376,7 @@ def build_activity_agent(
     tools = [
         analyze_running_activity,
         analyze_cycling_activity,
+        analyze_swimming_activity,
         inspect_general_activity,
     ]
     return create_agent(model=llm, tools=tools, system_prompt=system_prompt)
@@ -354,7 +508,8 @@ def generate_critiques() -> None:
         or os.getenv("OPENAI_API_MODEL")
         or "gpt-3.5-turbo"
     )
-    resolved_base_url = os.getenv("ONE_API_REMOTE") or os.getenv("OPENAI_BASE_URL")
+    resolved_base_url = os.getenv(
+        "ONE_API_REMOTE") or os.getenv("OPENAI_BASE_URL")
     resolved_agent_prompt = (
         os.getenv("LLM_ACTIVITY_AGENT_PROMPT")
         or os.getenv(
